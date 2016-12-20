@@ -1,6 +1,7 @@
 use std::env;
 use std::f32;
 use std::i64;
+use std::process::exit;
 use std::thread::sleep;
 
 extern crate getopts;
@@ -47,7 +48,7 @@ fn build_params () -> Params {
     let mut params = Params {
         decay: 0.002,
         max_intensity: 0.8,
-        runfor: 5,
+        runfor: std::i32::MAX as i64,
         sleep: Duration::nanoseconds(20_000_000).to_std().unwrap(),
         temps: vec![],
         threshold: 0.001
@@ -59,12 +60,12 @@ fn build_params () -> Params {
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
     let mut opts = Options::new();
-    opts.optopt("d", "decay", "slow decay by this factor, defaults to 2", "decay");
+    opts.optopt("d", "decay", "slow decay by this factor, defaults to 2", "DECAY");
     opts.optmulti(
         "e",
         "temprange",
         "light temp range, in kelvin, default 2700:5500",
-        "low:high"
+        "LOW:HIGH"
     );
     opts.optflag("h", "help", "print this help menu");
     opts.optopt("m", "maxintensity", "maximum brightness, 1..255, default 75", "MAX");
@@ -82,7 +83,7 @@ fn build_params () -> Params {
     };
     if matches.opt_present("h") {
         print_usage(&program, opts);
-        return params;
+        exit(0);
     }
     if matches.opt_present("d") {
         params.decay = matches.opt_str("d").unwrap().parse::<f32>().unwrap();
