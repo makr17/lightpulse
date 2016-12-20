@@ -9,3 +9,5 @@ pulse RGB pixels with selections from one or more light temp ranges
 * program runs for configured number of minutes (runfor)
 
 extends whitepulse, which only did white pixels in range from warm to cold
+
+uses [houselights](https://github.com/makr17/houselights) for a lot of boilerplate
