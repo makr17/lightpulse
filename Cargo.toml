@@ -1,0 +1,10 @@
+[package]
+name = "lightpulse"
+version = "0.1.0"
+authors = ["makr17 <bracher@gmail.com>"]
+
+[dependencies]
+getopts = "0.2"
+rand = "0.3"
+time = "0.1"
+houselights = { git = "https://github.com/makr17/houselights.git" }
