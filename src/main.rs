@@ -13,24 +13,54 @@ use rand::distributions::{IndependentSample,Range};
 extern crate time;
 use time::Duration;
 
-#[derive(Debug)]
 struct Params {
     decay:         f32,
     max_intensity: f32,
     runfor:        i64,
     sleep:         std::time::Duration,
-    temps:         Vec<TempRange>,
+    ranges:        Vec<RGBRange>,
     threshold:     f32
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
-struct Pixel { intensity: f32, age: u32, temp: u16, rgb: RGB }
+#[derive(Clone,Debug)]
+struct Pixel { intensity: f32, age: u32, rgb: RGB }
 
-#[derive(Debug)]
-struct TempRange {
-    low:   u16,
-    high:  u16,
+struct RGBRange {
+    low:    RGB,
+    high:   RGB,
+    range:  Range<f32>,
+}
+
+impl RGBRange {
+    fn new() -> RGBRange {
+        return RGBRange {
+            low:   RGB { red: 0, green: 0, blue: 0 },
+            high:  RGB { red: 0, green: 0, blue: 0 },
+            range: Range::new(0_f32, 1_f32)
+        }
+    }
+    fn pick(&self) -> RGB {
+        let choice: RGB = RGB {
+            red:   self._u8_in_range(self.low.red,   self.high.red),
+            green: self._u8_in_range(self.low.green, self.high.green),
+            blue:  self._u8_in_range(self.low.blue,  self.high.blue),
+        };
+        return choice;
+    }
+    fn _u8_in_range (&self, a: u8, b: u8) -> u8 {
+        let mut bounds: Vec<u8> = vec![];
+        bounds.push(a);
+        bounds.push(b);
+        bounds.sort();
+        //println!("{:?}", bounds);
+        let mut rng = rand::thread_rng();
+        let choice: u8 =
+            (bounds[0] as f32
+             + self.range.ind_sample(&mut rng)
+             * (bounds[1] - bounds[0]) as f32
+            ).round() as u8;
+        return choice;
+    }
 }
 
 fn print_usage(program: &str, opts: Options) {
@@ -38,9 +68,40 @@ fn print_usage(program: &str, opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-fn parse_temp (input: String) -> TempRange {
+fn parse_temp (input: String) -> RGBRange {
     let tokens: Vec<u16> = input.split(":").map(|x| x.parse::<u16>().unwrap()).collect();
-    return TempRange { low: tokens[0], high: tokens[1] };
+    return RGBRange {
+        low:   kelvin(tokens[0]),
+        high:  kelvin(tokens[1]),
+        range: Range::new(0_f32, 1_f32)
+    };
+}
+
+fn parse_color(input: String) -> RGBRange {
+    //println!("parse_color({})", input);
+    let colors: Vec<String> = input.split(":").map(|x| x.parse::<String>().unwrap()).collect();
+    return RGBRange {
+        low:   hex2rgb(&colors[0]),
+        high:  hex2rgb(&colors[1]),
+        range: Range::new(0_f32, 1_f32)
+    }
+}
+
+fn hex2rgb(hex: &String) -> RGB {
+    return RGB {
+        red:   match i32::from_str_radix(&hex[0..2], 16) {
+            Ok(m)   => { m as u8 },
+            Err(_f) => { 0 }  // TODO: error?
+        },
+        green: match i32::from_str_radix(&hex[2..4], 16) {
+            Ok(m)   => { m as u8 },
+            Err(_f) => { 0 }  // TODO: error?
+        },
+        blue:  match i32::from_str_radix(&hex[4..6], 16) {
+            Ok(m)   => { m as u8 },
+            Err(_f) => { 0 }  // TODO: error?
+        }
+    }
 }
 
 fn build_params () -> Params {
@@ -50,11 +111,9 @@ fn build_params () -> Params {
         max_intensity: 0.8,
         runfor: std::i32::MAX as i64,
         sleep: Duration::nanoseconds(20_000_000).to_std().unwrap(),
-        temps: vec![],
+        ranges: vec![],
         threshold: 0.001
     };
-    // default to one range, warm white to cool white
-    params.temps.push(TempRange { low: 2700, high: 5500 });
 
     // parse command line args and adjust params accordingly
     let args: Vec<String> = env::args().collect();
@@ -65,6 +124,12 @@ fn build_params () -> Params {
         "e",
         "temprange",
         "light temp range, in kelvin, default 2700:5500",
+        "LOW:HIGH"
+    );
+    opts.optmulti(
+        "g",
+        "rgbrange",
+        "color range, RGB in Hex, format RRGGBB:RRGGBB, no default",
         "LOW:HIGH"
     );
     opts.optflag("h", "help", "print this help menu");
@@ -89,11 +154,14 @@ fn build_params () -> Params {
         params.decay = matches.opt_str("d").unwrap().parse::<f32>().unwrap();
     }
     if matches.opt_present("e") {
-        let mut temps: Vec<TempRange> = vec![];
         for t in matches.opt_strs("e") {
-            temps.push(parse_temp(t));
+            params.ranges.push(parse_temp(t));
         }
-        params.temps = temps;
+    }
+    if matches.opt_present("g") {
+        for c in matches.opt_strs("g") {
+            params.ranges.push(parse_color(c));
+        }
     }
     if matches.opt_present("m") {
         let max: u8 = matches.opt_str("m").unwrap().parse::<u8>().unwrap();
@@ -112,6 +180,10 @@ fn build_params () -> Params {
     }
     if matches.opt_present("t") {
         params.threshold = matches.opt_str("t").unwrap().parse::<f32>().unwrap();
+    }
+    if params.ranges.len() == 0 {
+        // default to one range, warm white to cool white
+        params.ranges.push(RGBRange { low: kelvin(2700), high: kelvin(5500), range: Range::new(0_f32, 1_f32) });
     }
     return params;
 }
@@ -137,7 +209,6 @@ fn main() {
             let pixel = Pixel {
                 intensity: 0_f32,
                 age: 0,
-                temp: 0,
                 rgb: RGB { red: 0, green: 0, blue: 0 },
             };
             lights.push(pixel);
@@ -146,54 +217,51 @@ fn main() {
 
     let mut rng = rand::thread_rng();
     let zero_to_one = Range::new(0_f32, 1_f32);
-    let color_picker = Range::new(0, params.temps.len());
-    let ranges: Vec<Range<u16>> = params.temps.iter().map(|x| Range::new(x.low, x.high)).collect();
+    let color_picker = Range::new(0, params.ranges.len());
     
     let finish = time::get_time() + Duration::minutes(params.runfor);
     loop {
+        let mut rgb: Vec<RGB> = vec![];
         for light in lights.iter_mut() {
-            if light.intensity == 0_f32 {
-                // light is currently dark
-                // test to see if we want to light it
+            if light.age == 0 {
+                // unlit
                 if zero_to_one.ind_sample(&mut rng) < params.threshold {
-                    // we do, so pick a random intensity
+                    // but passed random test, so light it with color/intensity
                     light.intensity = zero_to_one.ind_sample(&mut rng) as f32;
-                    // pick a color
-                    let color_idx = color_picker.ind_sample(&mut rng) as usize;
-                    light.temp = ranges[color_idx].ind_sample(&mut rng);
-                    // convert color temp and intensity to rgb
-                    light.rgb = scale_rgb(kelvin(light.temp), light.intensity, params.max_intensity);
-                    // and increment the age
-                    light.age += 1;
+                    // pick a random color picker
+                    let idx: usize = color_picker.ind_sample(&mut rng) as usize;
+                    // and let it choose the color
+                    light.rgb = params.ranges[idx].pick();
+                    //println!("{}: {:?}", idx, light.rgb);
                 }
-            } else {
-                // light is lit
-                // test to see if we rise or fall
-                // probability of falling should go up as light ages
+            }
+            if light.intensity > 0.0 {
+                rgb.push(scale_rgb(&light.rgb, light.intensity, params.max_intensity));
+                // up or down?
+                light.age += 1;
                 if zero_to_one.ind_sample(&mut rng) > 1.0/(light.age as f32) {
                     // falling
                     light.intensity -= (zero_to_one.ind_sample(&mut rng) * params.decay) as f32;
-
-                    light.age += 1;
                     // TODO: a test floor that doesn't involve redundant gamma calculations
                     let gamma: RGB = gamma_correct(&light.rgb);
                     if (gamma.red as u16 + gamma.green as u16 + gamma.blue as u16) < 20 {
-                        light.intensity = 0_f32;
-                        light.rgb = RGB::null();
+                        light.intensity = 0.0;
+                        //light.rgb = RGB::null();
                         light.age = 0;
                     }
                 } else {
                     // rising
-                    light.intensity += zero_to_one.ind_sample(&mut rng) * params.decay * (params.max_intensity - light.intensity);
+                    light.intensity +=
+                        zero_to_one.ind_sample(&mut rng)
+                        * params.decay * (params.max_intensity - light.intensity);
                     
                     light.age += 1;
-                    light.rgb = scale_rgb(kelvin(light.temp), light.intensity, params.max_intensity);
                 }
+            } else {
+                rgb.push(RGB::null())
             }
         }
 
-        // extract rgb structs from vector of pixels
-        let rgb: Vec<RGB> = lights.clone().into_iter().map(|x| x.rgb).collect();
         // and send it as a slice to render()
         render(&rgb, &zones, &dmx);
         if time::get_time() > finish {

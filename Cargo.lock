@@ -21,7 +21,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "houselights"
 version = "0.1.0"
-source = "git+https://github.com/makr17/houselights.git#3f7872883f413de6f994c7e3bee7d38a56a3d92c"
+source = "git+https://github.com/makr17/houselights.git#049316a929189a0048cb70873c2fc65c0a429cbf"
 dependencies = [
  "sacn 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
