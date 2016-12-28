@@ -7,7 +7,7 @@ use std::thread::sleep;
 extern crate getopts;
 use getopts::Options;
 extern crate houselights;
-use houselights::houselights::{RGB,Zone,Dmx,kelvin,scale_rgb,gamma_correct,render};
+use houselights::houselights::{RGB,Zone,Dmx,kelvin,scale_rgb,render};
 extern crate rand;
 use rand::distributions::{IndependentSample,Range};
 extern crate time;
@@ -23,7 +23,7 @@ struct Params {
 }
 
 #[derive(Clone,Debug)]
-struct Pixel { intensity: f32, age: u32, rgb: RGB }
+struct Pixel { age: u32, rgb: RGB }
 
 struct RGBRange {
     low:    RGB,
@@ -70,21 +70,19 @@ fn print_usage(program: &str, opts: Options) {
 
 fn parse_temp (input: String) -> RGBRange {
     let tokens: Vec<u16> = input.split(":").map(|x| x.parse::<u16>().unwrap()).collect();
-    return RGBRange {
-        low:   kelvin(tokens[0]),
-        high:  kelvin(tokens[1]),
-        range: Range::new(0_f32, 1_f32)
-    };
+    let mut range = RGBRange::new();
+    range.low  = kelvin(tokens[0]);
+    range.high = kelvin(tokens[1]);
+    return range;
 }
 
 fn parse_color(input: String) -> RGBRange {
     //println!("parse_color({})", input);
     let colors: Vec<String> = input.split(":").map(|x| x.parse::<String>().unwrap()).collect();
-    return RGBRange {
-        low:   hex2rgb(&colors[0]),
-        high:  hex2rgb(&colors[1]),
-        range: Range::new(0_f32, 1_f32)
-    }
+    let mut range = RGBRange::new();
+    range.low  = hex2rgb(&colors[0]);
+    range.high = hex2rgb(&colors[1]);
+    return range;
 }
 
 fn hex2rgb(hex: &String) -> RGB {
@@ -102,6 +100,19 @@ fn hex2rgb(hex: &String) -> RGB {
             Err(_f) => { 0 }  // TODO: error?
         }
     }
+}
+
+fn age2intensity(age: u32) -> f32 {
+    // stretch x by a factor of 4, to stay lit longer
+    let fage = (age as f32)/4.0;
+    // log-normal probability density function for the long tail we want
+    // break out sigma and mu to make it easier to tweak moving forward
+    let sigma = 0.5;
+    let mu    = 0.0;
+    let intensity = 1.0/(sigma * (2.0 * std::f32::consts::PI).sqrt())
+        * (-1.0 * ((fage.ln() - mu) * (fage.ln() - mu))/(2.0 * sigma * sigma)).exp();
+    // scale by max_intensity
+    return intensity;
 }
 
 fn build_params () -> Params {
@@ -207,7 +218,6 @@ fn main() {
     for zone in zones.iter() {
         for _i in 0..zone.body {
             let pixel = Pixel {
-                intensity: 0_f32,
                 age: 0,
                 rgb: RGB { red: 0, green: 0, blue: 0 },
             };
@@ -226,35 +236,23 @@ fn main() {
             if light.age == 0 {
                 // unlit
                 if zero_to_one.ind_sample(&mut rng) < params.threshold {
-                    // but passed random test, so light it with color/intensity
-                    light.intensity = zero_to_one.ind_sample(&mut rng) as f32;
+                    light.age = 1;
                     // pick a random color picker
                     let idx: usize = color_picker.ind_sample(&mut rng) as usize;
                     // and let it choose the color
                     light.rgb = params.ranges[idx].pick();
-                    //println!("{}: {:?}", idx, light.rgb);
                 }
             }
-            if light.intensity > 0.0 {
-                rgb.push(scale_rgb(&light.rgb, light.intensity, params.max_intensity));
-                // up or down?
-                light.age += 1;
-                if zero_to_one.ind_sample(&mut rng) > 1.0/(light.age as f32) {
-                    // falling
-                    light.intensity -= (zero_to_one.ind_sample(&mut rng) * params.decay) as f32;
-                    // TODO: a test floor that doesn't involve redundant gamma calculations
-                    let gamma: RGB = gamma_correct(&light.rgb);
-                    if (gamma.red as u16 + gamma.green as u16 + gamma.blue as u16) < 20 {
-                        light.intensity = 0.0;
-                        //light.rgb = RGB::null();
-                        light.age = 0;
-                    }
-                } else {
-                    // rising
-                    light.intensity +=
-                        zero_to_one.ind_sample(&mut rng)
-                        * params.decay * (params.max_intensity - light.intensity);
-                    
+            if light.age > 0 {
+                let intensity = age2intensity(light.age);
+                if intensity == 0.0 {
+                    light.age = 0;
+                    rgb.push(RGB::null())
+                }
+                else {
+                    let value: RGB = scale_rgb(&light.rgb, intensity, params.max_intensity);
+                    println!("{:?} * {} = {:?}", light.rgb, intensity, value);
+                    rgb.push(value);
                     light.age += 1;
                 }
             } else {
