@@ -102,23 +102,27 @@ fn hex2rgb(hex: &String) -> RGB {
     }
 }
 
-fn age2intensity(age: u32) -> f32 {
+fn age2intensity(age: u32, params: &Params) -> f32 {
     // stretch x by a factor of 4, to stay lit longer
-    let fage = (age as f32)/4.0;
+    let fage = (age as f32)/params.decay;
     // log-normal probability density function for the long tail we want
     // break out sigma and mu to make it easier to tweak moving forward
     let sigma = 0.5;
     let mu    = 0.0;
     let intensity = 1.0/(sigma * (2.0 * std::f32::consts::PI).sqrt())
-        * (-1.0 * ((fage.ln() - mu) * (fage.ln() - mu))/(2.0 * sigma * sigma)).exp();
-    // scale by max_intensity
+        * (-1.0 * ((fage.ln() - mu) * (fage.ln() - mu))/(2.0 * sigma * sigma)).exp()
+        + 0.05;
+    // return 0 if value is small enough to bottom out u8
+    if intensity < 1.0/510.0 {
+        return 0.0;
+    }
     return intensity;
 }
 
 fn build_params () -> Params {
     // seed default params
     let mut params = Params {
-        decay: 0.002,
+        decay: 2.0,
         max_intensity: 0.8,
         runfor: std::i32::MAX as i64,
         sleep: Duration::nanoseconds(20_000_000).to_std().unwrap(),
@@ -244,14 +248,14 @@ fn main() {
                 }
             }
             if light.age > 0 {
-                let intensity = age2intensity(light.age);
+                let intensity = age2intensity(light.age, &params);
                 if intensity == 0.0 {
                     light.age = 0;
                     rgb.push(RGB::null())
                 }
                 else {
                     let value: RGB = scale_rgb(&light.rgb, intensity, params.max_intensity);
-                    println!("{:?} * {} = {:?}", light.rgb, intensity, value);
+                    println!("{}: {:?} * {} = {:?}", light.age, light.rgb, intensity, value);
                     rgb.push(value);
                     light.age += 1;
                 }
